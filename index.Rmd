@@ -1,0 +1,269 @@
+---
+title: 'Stop and Frisk in DC: Jul14-Aug18 2019'
+author: "Brendan Freehart"
+date: "October 14, 2019"
+output: 
+  html_document:
+    toc: true
+    toc_depth: 1
+    toc_float: true
+    theme: spacelab
+    highlight: tango
+    fig_caption: yes
+---
+_This site was built using RMarkdown_
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE, warning = FALSE)
+
+library(RColorBrewer)
+library(knitr)
+library(kableExtra)
+library(plotly)
+library(mapview)
+library(tidyverse)
+
+load('frisk_19_clean.RData')
+
+frisks_per_hour <- nrow(frisks) / (as.integer(max(frisks$stop_date) - min(frisks$stop_date))*24)
+semicolon_delim_pattern <- "(.+)\\;\\s+(.+)\\;\\s+(.+)\\;\\s+(.+)\\;\\s+(.+)|(.+)\\;\\s+(.+)\\;\\s+(.+)\\;\\s+(.+)|(.+)\\;\\s+(.+)\\;\\s+(.+)|(.+)\\;\\s+(.+)|(.+)"
+
+```
+
+# Stop and Frisks in DC
+Stop and Frisk is the practice of temporarily detaining, questioning, and searching civilians on the street without probable cause [^1]. Washington, DC's Metropolitan Police Department is required by the NEAR Act to record Stop and Frisks [^2].
+
+Between July 14th and August 18th, there were `r sprintf("%.1f", frisks_per_hour)` stop and frisks per hour.
+
+```{r top level}
+frisks %>% 
+  summarise(
+    stops = n(), 
+    arrests = sum(!is.na(arrest_date)),
+    prcnt_arrests = arrests / stops
+  ) %>%
+  mutate(
+    prcnt_arrests = sprintf("%.1f%%", prcnt_arrests*100)
+  ) %>% 
+  kable(col.names = c("Stop and Frisks","Arrests","% of Frisks leading to Arrest")) %>% 
+  kable_styling(bootstrap_options = c("striped", "hover", "responsive", position = "right", full_width = F))
+
+```
+
+
+***
+# Who is Targeted by Stop and Frisk?
+
+Reported Stop and Frisk incidents show a substantial bias towards young, black men. **93% of people stopped were black**.
+
+```{r by race}
+gg_race <- frisks %>%
+  group_by(race_ethnicity) %>% 
+  summarise(
+    Arrest = sum(!is.na(arrest_date)),
+    `No Arrest` = n() - Arrest
+  ) %>% 
+  gather(key = 'Outcome', value = 'Stops', -race_ethnicity) %>% 
+  ggplot(aes(reorder(race_ethnicity, -Stops), Stops, fill = Outcome)) +
+  geom_bar(stat = "identity") + 
+  theme_minimal(base_family="Montserrat") + 
+  theme(axis.text.x = element_text(angle=60, hjust=1), axis.title.x = element_blank(), plot.title = element_text(size = 24)) + 
+  scale_fill_manual(values = rev(brewer.pal(4,"Blues"))) + 
+  labs(title = '# of Frisks by Recorded Race / Ethnicity', y = 'Stop and Frisks')
+
+gg_race %>% 
+  ggplotly(tooltip = "Stops") %>% 
+  add_annotations(
+    yref="paper", 
+    xref="paper", 
+    y=1.15, 
+    x=0, 
+    text="# of Frisks by Recorded Race / Ethnicity", 
+    showarrow=F, 
+    font=list(size=24),
+    hovertemplate = '%{y} Stops'
+  ) %>% 
+  layout(
+    title=FALSE
+  )
+
+```
+
+
+```{r demog table}
+gg_demo <- frisks %>% 
+  mutate(
+    demo_segment = paste(race_ethnicity,gender,age_group)
+  ) %>% 
+  group_by(demo_segment) %>% 
+  summarise(
+    prcnt_of_total_stops = n() / nrow(frisks),
+    arrests = sum(!is.na(arrest_date)),
+    non_arrests = n() - arrests
+  ) %>% 
+  ungroup() %>% 
+  mutate(
+    demo_segment = if_else(prcnt_of_total_stops < 0.01, 'Other', demo_segment)
+  ) %>% 
+  group_by(demo_segment) %>%  
+  summarise(
+    Arrests = sum(arrests),
+    `No Arrests` = sum(non_arrests)
+  ) %>% 
+  gather(key = 'Outcome', value = 'Stops', -demo_segment) %>% 
+  ggplot(aes(reorder(demo_segment, -Stops), Stops, fill = Outcome)) + 
+  geom_bar(stat = "identity") + 
+  theme_minimal(base_family="Montserrat") + 
+  theme(axis.text.x = element_text(angle=60, hjust=1), axis.title.x = element_blank(), plot.title = element_text(size = 24)) + 
+  scale_fill_manual(values = rev(brewer.pal(4,"Blues"))) + 
+  labs(title = '# of Frisks by Race, Gender, and Age', y = 'Stop and Frisks')
+
+gg_demo %>% 
+  ggplotly(tooltip = "Stops") %>% 
+  add_annotations(
+    yref="paper", 
+    xref="paper", 
+    y=1.15, 
+    x=0, 
+    text="# of Frisks by Race, Gender, and Age", 
+    showarrow=F, 
+    font=list(size=24),
+    hovertemplate = '%{y} Stops'
+  ) %>% 
+  layout(
+    title=FALSE
+  )
+
+```
+
+***
+
+# What Reason is Provided for Stop and Frisks?
+
+```{r reasons cited}
+gg_reasons <- frisks %>% 
+  transmute(
+    reason_col1 = str_match(stop_reason_nonticket, semicolon_delim_pattern)[,2],
+    reason_col2 = str_match(stop_reason_nonticket, semicolon_delim_pattern)[,3],
+    reason_col3 = str_match(stop_reason_nonticket, semicolon_delim_pattern)[,4],
+    reason_col4 = str_match(stop_reason_nonticket, semicolon_delim_pattern)[,5],
+    reason_col5 = str_match(stop_reason_nonticket, semicolon_delim_pattern)[,6],
+    reason_col6 = str_match(stop_reason_nonticket, semicolon_delim_pattern)[,7],
+    reason_col7 = str_match(stop_reason_nonticket, semicolon_delim_pattern)[,8],
+    reason_col8 = str_match(stop_reason_nonticket, semicolon_delim_pattern)[,9],
+    reason_col9 = str_match(stop_reason_nonticket, semicolon_delim_pattern)[,10],
+    reason_col10 = str_match(stop_reason_nonticket, semicolon_delim_pattern)[,11],
+    reason_col11 = str_match(stop_reason_nonticket, semicolon_delim_pattern)[,12],
+    reason_col12 = str_match(stop_reason_nonticket, semicolon_delim_pattern)[,13],
+    reason_col13 = str_match(stop_reason_nonticket, semicolon_delim_pattern)[,14],
+    reason_col14 = str_match(stop_reason_nonticket, semicolon_delim_pattern)[,15],
+    reason_col15 = str_match(stop_reason_nonticket, semicolon_delim_pattern)[,16]
+  ) %>% 
+  gather() %>% 
+  filter(!is.na(value)) %>%
+  mutate(value = if_else(value=='NULL', 'Not provided', value)) %>% 
+  select(reason = value) %>% 
+  group_by(reason) %>% 
+  summarise(cited = n()) %>%
+  ggplot(aes(reorder(reason, -cited), cited), fill=reason) +
+  geom_bar(stat = "identity") + 
+  theme_minimal(base_family="Montserrat") + 
+  theme(axis.text.x = element_text(angle=60, hjust=1), axis.title.x = element_blank(), plot.title = element_text(size = 24)) + 
+  scale_fill_manual(values = rev(brewer.pal(4,"Blues"))) + 
+  labs(title = 'Cited Reason for Stop and Frisk', y = 'Cited')
+
+gg_reasons %>% 
+  ggplotly(tooltip = "Cited") %>% 
+  add_annotations(
+    yref="paper", 
+    xref="paper", 
+    y=1.15, 
+    x=0, 
+    text="Cited Reason for Stop and Frisk", 
+    showarrow=F, 
+    font=list(size=24),
+    hovertemplate = '%{y} Cited'
+  ) %>% 
+  layout(
+    title=FALSE
+  )
+
+```
+
+\
+
+# What Charges Are Brought?
+```{r arrests}
+frisks %>% 
+  filter(!is.na(arrest_date)) %>% 
+  group_by(arrest_charges) %>% 
+  summarise(
+    stops = n()
+  ) %>% 
+  filter(stops >= 10 ) %>% 
+  arrange(-stops) %>% 
+  kable(col.names = c("Charges","# of Stops")) %>% 
+  kable_styling(bootstrap_options = c("striped", "hover", "responsive", position = "right", full_width = F))
+
+```
+
+*** 
+
+# Where is Stop and Frisk happening?
+
+```{r population}
+census_with_frisks %>% 
+  mapview(zcol = "Total", legend = TRUE)
+
+```
+
+\
+
+```{r income}
+census_with_frisks %>% 
+  mapview(zcol = "MedianIncome", legend = TRUE)
+
+```
+
+\
+
+```{r percentage black}
+census_with_frisks %>% 
+  mapview(zcol = "prcnt_black", legend = TRUE)
+
+```
+
+\
+
+```{r stops}
+census_with_frisks %>% 
+  mapview(zcol = "total_stops", legend = TRUE)
+
+```
+
+\
+
+```{r percentage of black targets}
+census_with_frisks %>% 
+  mapview(zcol = "prcnt_black_stops", legend = TRUE)
+
+```
+
+\
+
+```{r calls for service}
+census_with_frisks %>% 
+  mapview(zcol = "prcnt_call_for_service", legend = TRUE)
+
+```
+
+
+***
+
+# See also
+This excellent [analysis of _reported_ DC Stop and Frisk from 2010-2017](https://gwarrenn.github.io/Stop-and-Frisk-DC/).
+
+[^1]: Source: [Stop and Frisk Report 2013](https://web.archive.org/web/20170211080746/http://oag.state.ny.us/sites/default/files/pdfs/bureaus/civil_rights/stp_frsk.pdf)
+[^2]: Source: [Implementing the NEAR Act to reduce violence in D.C.](https://www.dcpolicycenter.org/publications/implementing-near-act-reduce-violence-d-c/)
+
+

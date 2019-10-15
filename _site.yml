@@ -1,0 +1,7 @@
+name: "dc-stop-and-frisk-Jul14-Aug18-2019"
+output_dir: "."
+navbar:
+  title: "Stop and Frisk in DC: Jul14-Aug18 2019"
+  left:
+    - text: "Home"
+      href: index.html
