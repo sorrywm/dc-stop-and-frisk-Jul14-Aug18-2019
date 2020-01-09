@@ -1,17 +1,15 @@
-#Read in and save the full stop data (downloaded from https://mpdc.dc.gov/stopdata)
-#If it doesn't error, you could use download.file()
-#Copied from frisk_19_etl.R
 # library(ggmap)
 library(tidycensus)
 library(lubridate)
 library(tidyverse)
 
 ### Load data ----
-sf19 <- read.csv('data/Stop Data_09092019.csv')
+sf19 <- read_csv('Stop Data_09092019.csv')
 
 ### Filter for non-traffic stops in which there was a frisk ----
-stops <- sf19 %>% 
+frisks <- sf19 %>% 
   filter(
+    person_search_or_protective_pat_down == 1,
     stop_type == 'Non-ticket Stop',
     !grepl('traffic', stop_reason_nonticket, ignore.case = TRUE),
     !grepl('crash', stop_reason_nonticket, ignore.case = TRUE),
@@ -45,15 +43,15 @@ stops <- sf19 %>%
   ) %>% 
   select(-age_bucket)
 
-i### Geocode addresses - DO NOT RUN ----
+### Geocode addresses - DO NOT RUN ----
 # Google Maps API key required
 # sf_foot <- sf_foot %>% rename(address = stop_location_block)
 # frisks_geocoded <- sf_foot %>% mutate_geocode(address)
-#load('frisks_geocoded_19.RData')
+load('frisks_geocoded_19.RData')
 
 ### Pull census data ----
 # Census API key required
-census_with_stops <- get_acs(
+census_with_frisks <- get_acs(
   geography = "tract",
   variables = c('B02001_001', 'B02001_002', 'B02001_003', 'B02001_004', 'B02001_005', 'B02001_006', 'B02001_007', 'B02001_008', 'B02001_009', 'B02001_010', 'B06011_001'),
   output = "wide",
@@ -92,7 +90,4 @@ census_with_stops <- get_acs(
   ) %>% 
   mutate(total_stops = replace_na(total_stops, 0))
 
-save(stops, census_with_stops, file = 'stop_19_clean.RData')
-
-#Questions that we could address in future:
-#How does the racial breakdown of stops compare to the racial breakdown of the census tract?
+save(frisks, census_with_frisks, file = 'frisk_19_clean.RData')
